@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peace Tree Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f4f4f4;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        .output {
+            text-align: center;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            margin-top: 10px;
+        }
+        .canvas-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .canvas-label {
+            margin-top: 10px;
+        }
+        .inline-info {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Peace Tree Tool</h1>
+    <div class="controls">
+        <h2>Peace Tree Retrieval Method</h2>
+        <div>
+            <label>
+                <input type="radio" name="method" id="restMethod"> Adafruit REST API
+            </label>
+        </div>
+        <div>
+            <label>
+                <input type="radio" name="method" id="mqttMethod"> Adafruit MQTT Websocket
+            </label>
+        </div>
+        <div>
+            <label>
+                <input type="radio" name="method" id="sliderMethod"> Simulated Value
+                <input type="range" id="slider" min="0" max="2000" value="1000">
+                <input type="number" id="sliderValue" min="0" max="2000" value="1000">
+            </label>
+        </div>
+        <div>
+            <h2>MQTT Credentials</h2>
+            <label>
+                Username: <input type="text" id="mqttUsername" value="donkimber" autocomplete="username">
+            </label>
+            <br>
+            <label>
+                Password: <input type="text" id="mqttPassword" value="aio_RNBV98cz7y9kJaAAf1m46q3f0Ojq" autocomplete="current-password">
+            </label>
+        </div>
+    </div>
+
+    <div class="controls">
+        <h2>Submit a Prayer</h2>
+        <input type="text" id="prayerInput" placeholder="Enter a phrase">
+        <button id="peaceButton">Peace</button>
+    </div>
+
+    <div class="output">
+        <h2>Peace Score</h2>
+        <div class="inline-info">
+            <p>Value: <span id="scoreValue">-</span></p>
+            <p>Last Updated: <span id="timestamp">-</span></p>
+            <p>Method: <span id="method">-</span></p>
+        </div>
+        <div class="canvas-container">
+            <canvas id="colorCanvas" width="300" height="100"></canvas>
+            <div class="canvas-label">Raw Peace Score as Hue</div>
+        </div>
+        <div class="canvas-container">
+            <canvas id="patternCanvas" width="300" height="100"></canvas>
+            <div class="canvas-label">Original Peace Tree Colors</div>
+        </div>
+    </div>
+
+    <script>
+        class PeaceTool {
+            constructor() {
+                this.restMethodRadio = document.getElementById('restMethod');
+                this.mqttMethodRadio = document.getElementById('mqttMethod');
+                this.sliderMethodRadio = document.getElementById('sliderMethod');
+                this.slider = document.getElementById('slider');
+                this.sliderValue = document.getElementById('sliderValue');
+                this.scoreValueElement = document.getElementById('scoreValue');
+                this.timestampElement = document.getElementById('timestamp');
+                this.methodElement = document.getElementById('method');
+                this.colorCanvas = document.getElementById('colorCanvas');
+                this.patternCanvas = document.getElementById('patternCanvas');
+                this.colorCtx = this.colorCanvas.getContext('2d');
+                this.patternCtx = this.patternCanvas.getContext('2d');
+                this.prayerInput = document.getElementById('prayerInput');
+                this.peaceButton = document.getElementById('peaceButton');
+                this.mqttUsername = document.getElementById('mqttUsername');
+                this.mqttPassword = document.getElementById('mqttPassword');
+
+                this.feed = "reachandteach/feeds/peacetree";
+                this.currentMethod = null;
+                this.mqttClient = null;
+                this.pollingInterval = null;
+
+                this.initialize();
+            }
+
+            initialize() {
+                this.slider.addEventListener('input', () => {
+                    this.sliderMethodRadio.checked = true;
+                    this.startSliderMethod();
+                });
+
+                this.sliderValue.addEventListener('input', () => {
+                    this.sliderMethodRadio.checked = true;
+                    this.startSliderMethod();
+                });
+
+                this.restMethodRadio.addEventListener('change', () => {
+                    if (this.restMethodRadio.checked) {
+                        this.startRestMethod();
+                    }
+                });
+
+                this.mqttMethodRadio.addEventListener('change', () => {
+                    if (this.mqttMethodRadio.checked) {
+                        this.startMqttMethod();
+                    }
+                });
+
+                this.sliderMethodRadio.addEventListener('change', () => {
+                    if (this.sliderMethodRadio.checked) {
+                        this.startSliderMethod();
+                    }
+                });
+
+                this.peaceButton.addEventListener('click', () => {
+                    this.submitPrayer();
+                });
+
+                this.prayerInput.addEventListener('keypress', (event) => {
+                    if (event.key === 'Enter') {
+                        this.peaceButton.click();
+                    }
+                });
+
+                this.restMethodRadio.checked = true;
+                this.startRestMethod();
+            }
+
+            updateDisplay(value) {
+                this.scoreValueElement.textContent = value;
+                this.timestampElement.textContent = new Date().toLocaleTimeString();
+                this.methodElement.textContent = this.currentMethod;
+
+                const hue = (value / 2000) * 360;
+                this.colorCtx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+                this.colorCtx.fillRect(0, 0, this.colorCanvas.width, this.colorCanvas.height);
+
+                let color;
+                if (value < 10) {
+                    color = "red";
+                } else if (value < 20) {
+                    color = "green";
+                } else if (value < 30) {
+                    color = "blue";
+                } else if (value < 35) {
+                    color = "aqua";
+                } else {
+                    color = "yellow";
+                }
+                this.patternCtx.fillStyle = color;
+                this.patternCtx.fillRect(0, 0, this.patternCanvas.width, this.patternCanvas.height);
+            }
+
+            async fetchRestData() {
+                try {
+                    const response = await fetch(`https://io.adafruit.com/api/v2/reachandteach/feeds/peacetree`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    this.updateDisplay(Number(data.last_value));
+                } catch (err) {
+                    console.error("Error fetching REST data:", err);
+                }
+            }
+
+            startRestMethod() {
+                this.stopCurrentMethod();
+                this.currentMethod = 'Adafruit REST API';
+                this.fetchRestData(); // Fetch immediately
+                this.pollingInterval = setInterval(() => this.fetchRestData(), 5000); // Fetch every 5 seconds
+            }
+
+            startMqttMethod() {
+                this.stopCurrentMethod();
+                this.currentMethod = 'Adafruit MQTT Websocket';
+                this.updateDisplay('-'); // Indicate the method immediately
+                const username = this.mqttUsername.value;
+                const password = this.mqttPassword.value;
+                this.mqttClient = mqtt.connect("wss://io.adafruit.com:443/mqtt", {
+                    username: username,
+                    password: password
+                });
+
+                this.mqttClient.on("connect", () => {
+                    console.log("Connected to MQTT");
+                    this.mqttClient.subscribe(this.feed);
+                });
+
+                this.mqttClient.on("message", (topic, message) => {
+                    if (topic === this.feed) {
+                        this.updateDisplay(Number(message.toString()));
+                    }
+                });
+
+                this.mqttClient.on("error", (err) => {
+                    console.error("MQTT error:", err);
+                });
+            }
+
+            startSliderMethod() {
+                this.stopCurrentMethod();
+                this.currentMethod = 'Simulated Value';
+                this.updateDisplay(Number(this.slider.value));
+            }
+
+            stopCurrentMethod() {
+                if (this.pollingInterval) {
+                    clearInterval(this.pollingInterval);
+                    this.pollingInterval = null;
+                }
+                if (this.mqttClient) {
+                    this.mqttClient.end();
+                    this.mqttClient = null;
+                }
+            }
+
+            submitPrayer() {
+                const str = this.prayerInput.value || "pray for peace";
+                const url = "https://www.reachandteach.com/peacetreelive.php";
+
+                const form = { prayer: str };
+                fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(form)
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log("posted", form);
+                        console.log("received", data);
+                    })
+                    .catch(error => console.error("Error posting prayer:", error));
+            }
+        }
+
+        // Initialize the PeaceTool class
+        new PeaceTool();
+    </script>
+</body>
+</html>
