@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peace Sign Hand Tracker</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            transition: background-color 0.5s ease;
+            background-color: #ff69b4;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
+        }
+
+        #videoContainer {
+            position: relative;
+            display: inline-block;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
+        }
+
+        #video {
+            width: 640px;
+            height: 480px;
+            max-width: 90vw;
+            max-height: 60vh;
+            object-fit: cover;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .status {
+            color: white;
+            font-size: 18px;
+            margin: 10px 0;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .peace-indicator {
+            font-size: 48px;
+            margin: 20px 0;
+            transition: transform 0.3s ease;
+        }
+
+        .peace-indicator.active {
+            transform: scale(1.2);
+        }
+
+        .instructions {
+            color: white;
+            font-size: 14px;
+            margin-top: 20px;
+            opacity: 0.8;
+        }
+
+        .error {
+            color: #ff6b6b;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✌️ Peace Sign Detector</h1>
+        
+        <div id="videoContainer">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        </div>
+        
+        <div class="peace-indicator" id="peaceIndicator">✌️</div>
+        <div class="status" id="status">Initializing...</div>
+        <div class="status" id="peaceTime">Peace Duration: 0s</div>
+        
+        <div class="instructions">
+            <p>Show a peace sign (✌️) to your camera!</p>
+            <p>The background will turn green the longer you hold the peace sign.</p>
+        </div>
+    </div>
+
+    <div id="errorDiv" class="error" style="display: none;"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const peaceTimeDiv = document.getElementById('peaceTime');
+        const peaceIndicator = document.getElementById('peaceIndicator');
+        const errorDiv = document.getElementById('errorDiv');
+
+        let peaceStartTime = null;
+        let totalPeaceTime = 0;
+        let lastPeaceDetected = 0;
+        let hands, camera;
+
+        // Color interpolation function
+        function interpolateColor(factor) {
+            // factor 0 = pink (#ff69b4), factor 1 = green (#32cd32)
+            const pink = {r: 255, g: 105, b: 180};
+            const green = {r: 50, g: 205, b: 50};
+            
+            const r = Math.round(pink.r + (green.r - pink.r) * factor);
+            const g = Math.round(pink.g + (green.g - pink.g) * factor);
+            const b = Math.round(pink.b + (green.b - pink.b) * factor);
+            
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        // Update background color based on peace duration
+        function updateBackgroundColor() {
+            const now = Date.now();
+            const timeSinceLastPeace = (now - lastPeaceDetected) / 1000;
+            
+            // Fade back to pink over 3 seconds
+            let factor = Math.max(0, (totalPeaceTime - timeSinceLastPeace) / 5);
+            factor = Math.min(1, factor);
+            
+            document.body.style.backgroundColor = interpolateColor(factor);
+            
+            // Update peace time display
+            if (peaceStartTime && lastPeaceDetected > now - 100) {
+                const currentDuration = (now - peaceStartTime) / 1000;
+                peaceTimeDiv.textContent = `Peace Duration: ${currentDuration.toFixed(1)}s`;
+            } else {
+                peaceTimeDiv.textContent = `Peace Duration: ${totalPeaceTime.toFixed(1)}s`;
+            }
+        }
+
+        // Detect peace sign from hand landmarks
+        function detectPeaceSign(landmarks) {
+            if (!landmarks || landmarks.length === 0) return false;
+            
+            const hand = landmarks[0];
+            
+            // Get key finger tip and joint positions
+            const indexTip = hand[8];
+            const indexPip = hand[6];
+            const middleTip = hand[12];
+            const middlePip = hand[10];
+            const ringTip = hand[16];
+            const ringPip = hand[14];
+            const pinkyTip = hand[20];
+            const pinkyPip = hand[18];
+            const thumbTip = hand[4];
+            const thumbIp = hand[3];
+            
+            // Check if index and middle fingers are extended
+            const indexExtended = indexTip.y < indexPip.y;
+            const middleExtended = middleTip.y < middlePip.y;
+            
+            // Check if ring and pinky are folded
+            const ringFolded = ringTip.y > ringPip.y;
+            const pinkyFolded = pinkyTip.y > pinkyPip.y;
+            
+            // Check thumb position (should be somewhat extended but not necessarily up)
+            const thumbExtended = thumbTip.y < thumbIp.y || Math.abs(thumbTip.x - thumbIp.x) > 0.05;
+            
+            // Peace sign: index and middle up, ring and pinky down
+            return indexExtended && middleExtended && ringFolded && pinkyFolded;
+        }
+
+        function onResults(results) {
+            // Resize canvas to match video
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw hand landmarks if detected
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                    drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1});
+                }
+            }
+            
+            // Detect peace sign
+            const peaceDetected = detectPeaceSign(results.multiHandLandmarks);
+            
+            if (peaceDetected) {
+                const now = Date.now();
+                lastPeaceDetected = now;
+                
+                if (!peaceStartTime) {
+                    peaceStartTime = now;
+                }
+                
+                totalPeaceTime = (now - peaceStartTime) / 1000;
+                statusDiv.textContent = '✌️ Peace sign detected!';
+                peaceIndicator.classList.add('active');
+                
+            } else {
+                if (peaceStartTime) {
+                    // Peace sign lost, reset start time
+                    peaceStartTime = null;
+                }
+                statusDiv.textContent = 'Show a peace sign ✌️';
+                peaceIndicator.classList.remove('active');
+            }
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            statusDiv.textContent = 'Error occurred';
+        }
+
+        // Initialize MediaPipe Hands
+        async function initializeApp() {
+            try {
+                // Initialize hands
+                hands = new Hands({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    }
+                });
+
+                hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults(onResults);
+
+                // Get camera access
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+
+                // Wait for video to load
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = resolve;
+                });
+
+                // Initialize camera
+                camera = new Camera(video, {
+                    onFrame: async () => {
+                        await hands.send({image: video});
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                camera.start();
+                statusDiv.textContent = 'Camera ready! Show a peace sign ✌️';
+                
+            } catch (error) {
+                console.error('Error initializing app:', error);
+                showError('Failed to initialize camera or hand tracking. Please allow camera access and refresh the page.');
+            }
+        }
+
+        // Update background color continuously
+        setInterval(updateBackgroundColor, 100);
+
+        // Start the app when page loads
+        window.addEventListener('load', initializeApp);
+
+        // Also try to start if MediaPipe libraries are already loaded
+        if (typeof Hands !== 'undefined' && typeof Camera !== 'undefined') {
+            initializeApp();
+        }
+    </script>
+</body>
+</html>
