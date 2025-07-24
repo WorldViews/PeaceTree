@@ -329,20 +329,22 @@ class BlueskyMonitor:
                 total_new_posts = 0
                 
                 for hashtag in self.hashtags:
-                    logger.info(f"Searching for posts with {hashtag}...")
+                    #logger.info(f"Searching for posts with {hashtag}...")
                     results = self.search_posts(hashtag)
                     
                     if results:
                         new_posts = self.process_search_results(results)
                         total_new_posts += new_posts
-                        logger.info(f"Found {new_posts} new posts for {hashtag}")
+                        if new_posts:
+                            logger.info(f"Found {new_posts} new posts for {hashtag}")
                     else:
                         logger.warning(f"No results for {hashtag}")
                     
                     # Small delay between hashtag searches
                     time.sleep(2)
                 
-                logger.info(f"Total new posts this cycle: {total_new_posts}")
+                if total_new_posts:
+                    logger.info(f"Total new posts this cycle: {total_new_posts}")
                 
                 # Reset error counter on successful cycle
                 consecutive_errors = 0
