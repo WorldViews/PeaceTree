@@ -10,8 +10,10 @@ import requests
 import os
 import getpass
 from datetime import datetime, timezone
-from typing import Set, Dict, Any, Optional
+from typing import Set, Dict, Tuple, Any, Optional
 import logging
+
+DATA_LOG_FILE = "DATA_LOG.json"
 
 # Configure logging
 logging.basicConfig(
@@ -272,6 +274,9 @@ class BlueskyMonitor:
             if post_id not in self.seen_posts:
                 self.seen_posts.add(post_id)
                 print(self.format_post_output(post_info))
+                if DATA_LOG_FILE:
+                    f = open(DATA_LOG_FILE, "a")
+                    f.write(json.dumps(post_info, indent=3) + "\n")
                 new_posts_count += 1
                 if post_info['text'].find("peacedance") >= 0:
                     post_peace_message()
@@ -290,7 +295,9 @@ class BlueskyMonitor:
             self.seen_posts = set(posts_list[-max_size//2:])
             logger.info(f"Cleaned up seen_posts cache, now tracking {len(self.seen_posts)} posts")
     
-    def get_credentials(self) -> tuple[str, str]:
+
+#    def get_credentials(self) -> tuple[str, str]:
+    def get_credentials(self) -> Tuple[str, str]:
         """Get Bluesky credentials from environment variables or user input"""
         # Try environment variables first
         handle = os.getenv('BLUESKY_HANDLE')
