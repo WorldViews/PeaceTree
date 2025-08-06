@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>MQTT Web Monitor + Publisher (Auth)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #eee;
+      padding: 1em;
+    }
+
+    #log {
+      white-space: pre-wrap;
+      background: #222;
+      padding: 10px;
+      height: 300px;
+      overflow-y: scroll;
+      border-radius: 6px;
+    }
+
+    input,
+    button {
+      margin: 4px;
+      padding: 6px;
+      border-radius: 4px;
+      border: none;
+    }
+
+    button {
+      background: #28a745;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #218838;
+    }
+  </style>
+  <!-- Load Paho MQTT client from jsDelivr -->
+  <script src="https://cdn.jsdelivr.net/npm/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
+</head>
+
+<body>
+  <h2>MQTT WebSocket Monitor + Publisher (Auth)</h2>
+  <div>
+    <label>Broker Host: <input type="text" id="broker" value="worldviews.org"></label>
+    <label>Port: <input type="number" id="port" value="9001" style="width:80px;"></label>
+    <label>Topic: <input type="text" id="topic" value="peacetreebsky"></label>
+    <button id="connectBtn">Connect</button>
+  </div>
+  <p id="status">Disconnected.</p>
+
+  <div id="log"></div>
+
+  <h3>Publish a Message</h3>
+  <div>
+    <textarea id="message" rows="3" cols="40" placeholder="Type a message..."></textarea><br>
+    <button id="publishBtn" disabled>Publish</button>
+  </div>
+
+  <script>
+    let client = null;
+
+    const statusDiv = document.getElementById("status");
+    const logDiv = document.getElementById("log");
+    const connectBtn = document.getElementById("connectBtn");
+    const publishBtn = document.getElementById("publishBtn");
+
+    // Hardcoded authentication
+    const USERNAME = "don";
+    const PASSWORD = "mqtt1234";
+
+    function log(text) {
+      const timestamp = new Date().toLocaleTimeString();
+      logDiv.innerText += `[${timestamp}] ${text}\n`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    connectBtn.addEventListener("click", () => {
+      const host = document.getElementById("broker").value;
+      const port = parseInt(document.getElementById("port").value, 10);
+      const topic = document.getElementById("topic").value;
+
+      const clientId = "web_" + Math.floor(Math.random() * 10000);
+
+      // Correct namespace: Paho.Client
+      client = new Paho.Client(host, port, clientId);
+
+      client.onConnectionLost = (responseObject) => {
+        statusDiv.innerText = "Connection lost: " + (responseObject.errorMessage || "Unknown");
+        publishBtn.disabled = true;
+      };
+
+      client.onMessageArrived = (message) => {
+        let payload = message.payloadString;
+        try {
+          const json = JSON.parse(payload);
+          payload = JSON.stringify(json, null, 2);
+        } catch (e) { /* Not JSON */ }
+        log(`Topic: ${message.destinationName} → ${payload}`);
+      };
+
+      client.connect({
+        userName: USERNAME,
+        password: PASSWORD,
+        useSSL: false, // Set true if using wss://
+        onSuccess: () => {
+          statusDiv.innerText = `Connected to ${host}:${port}`;
+          client.subscribe(topic);
+          log(`Subscribed to topic: ${topic}`);
+          publishBtn.disabled = false;
+        },
+        onFailure: (error) => {
+          statusDiv.innerText = "Connection failed: " + error.errorMessage;
+        }
+      });
+    });
+
+    publishBtn.addEventListener("click", () => {
+      const topic = document.getElementById("topic").value;
+      const text = document.getElementById("message").value;
+
+      if (!text.trim()) {
+        alert("Please enter a message!");
+        return;
+      }
+
+      const message = new Paho.Message(text);
+      message.destinationName = topic;
+      client.send(message);
+      log(`(You) → ${text}`);
+      document.getElementById("message").value = "";
+    });
+  </script>
+</body>
+
+</html>
