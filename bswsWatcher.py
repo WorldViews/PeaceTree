@@ -94,7 +94,8 @@ class BlueskyMonitor:
         
         # Track seen posts to avoid duplicates
         self.seen_posts: Set[str] = set()
-        
+        self.last_post_time = None  # UTC of the last post
+
         # Polling configuration
         self.poll_interval = poll_interval
         self.hashtags = ['#peace', '#peacetree']
@@ -102,7 +103,7 @@ class BlueskyMonitor:
         # Rate limiting
         self.last_request_time = 0
         self.min_request_interval = 1  # Minimum 1 second between requests
-        
+
         # Cursor for pagination
         self.cursor: Optional[str] = None
         
@@ -176,7 +177,7 @@ class BlueskyMonitor:
             time.sleep(self.min_request_interval - elapsed)
         self.last_request_time = time.time()
     
-    def search_posts(self, query: str, limit: int = 25) -> Dict[str, Any]:
+    def search_posts(self, query: str, limit: int = 50) -> Dict[str, Any]:
         """Search for posts using the AT Protocol search endpoint"""
         self.rate_limit()
         
@@ -283,13 +284,13 @@ class BlueskyMonitor:
         post_url = f"https://bsky.app/profile/{handle}/post/{post_id}"
         
         output = f"""
-{'='*60}
+{'-'*60}
 👤 {display_name} (@{author['handle']})
 🕐 {formatted_time}
 📝 {post_info['text']}
 📊 ❤️ {post_info['likeCount']} | 🔄 {post_info['repostCount']} | 💬 {post_info['replyCount']}
 🔗 {post_url}
-{'='*60}
+{'-'*60}
 """
         return output
     
@@ -301,6 +302,10 @@ class BlueskyMonitor:
         new_posts_count = 0
         posts = results['posts']
         
+        # sort posts by timestamps determined from 'createdAt' fields
+        # in ascending order
+        posts.sort(key=lambda p: p['record']['createdAt'], reverse=False)
+
         for post in posts:
             post_info = self.extract_post_info(post)
             if not post_info:
@@ -311,6 +316,14 @@ class BlueskyMonitor:
             
             if post_id not in self.seen_posts:
                 self.seen_posts.add(post_id)
+                print("="*70)
+                print(f"Total posts: {len(self.seen_posts)}")
+                # print time elapsed since previous post
+                if self.last_post_time:
+                    elapsed = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00')) - self.last_post_time
+                    # Print elapsed time in seconds
+                    print(f"Time since last post: {elapsed.total_seconds()} seconds")
+                self.last_post_time = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00'))
                 print(self.format_post_output(post_info))
                 if DATA_LOG_FILE:
                     print("Logging post message")
@@ -318,7 +331,7 @@ class BlueskyMonitor:
                     f.write(json.dumps(post_info, indent=3) + "\n")
                 if wsclient:
                     rc = wsclient.publish(TOPIC, json.dumps(post_info))
-                    print(f"Published to {TOPIC} rc: {rc} msg: {post_info}")
+                    print(f"Published to {TOPIC}")
                      
                 new_posts_count += 1
                 if post_info['text'].find("peacedance") >= 0:
