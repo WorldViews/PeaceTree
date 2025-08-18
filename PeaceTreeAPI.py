@@ -34,7 +34,7 @@ class PeaceTreeMQTTClient:
 
     def send_message(self, message: str):
         print(f"Sending message: {message} to topic: {self.topic}")
-        result = self.client.publish(self.topic, message)
+        result = self.client.publish(self.topic, message, retain=True)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
     def disconnect(self):
