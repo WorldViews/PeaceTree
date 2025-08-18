@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Set, Dict, Tuple, Any, Optional
 import logging
 import paho.mqtt.client as mqtt
+from ExpDecayRateEstimator import ExpDecayRateEstimator
+from PeaceTreeAPI import PeaceTreeMQTTClient
 
 BROKER = "takeoneworld.com"
 #TRANSPORT = "websockets"
@@ -26,21 +28,33 @@ PASSWORD = "d0cz3n0!2025"
 DATA_LOG_FILE = "DATA_LOG.json"
 
 wsclient = None
+rateEst = ExpDecayRateEstimator(1/500.0)  # Example alpha value for decay rate
 
-def on_connect(client, userdata, flags, rc):
-    print(f"Connected with result code {rc}")
+peaceTreeClient = None
+
+def startPeaceTreeClient():
+    global peaceTreeClient
+    topic = "peacetreedev/api"
+    peaceTreeClient = PeaceTreeMQTTClient(BROKER, PORT, topic,
+                                           username=USER, password=PASSWORD)
+    
+def on_connect(client, userdata, flags, rc, properties):
+    print("Connected with result code:", rc)
     # Subscribe to the topic
     #client.subscribe(TOPIC)
     #print(f"Subscribed to topic: {TOPIC}")
 
-def on_disconnect(client, userdata, rc):
-    print(f"Disconnected with result code {rc}")
+def on_disconnect(client, userdata, disconnect_flags, rc, properties):
+    print("Disconnected with result code:", rc)
     # do we need to initiate a new connect?
 
 def startWSClient():
     global wsclient
     print("*******  Getting MQTT Client - transport:", TRANSPORT)
-    wsclient = mqtt.Client(transport=TRANSPORT)
+    wsclient = mqtt.Client(transport=TRANSPORT,
+                           protocol=mqtt.MQTTv5,
+                           callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+
     if USER:
         print("Authenticating User:", USER)
         wsclient.username_pw_set(USER, PASSWORD)
@@ -49,8 +63,10 @@ def startWSClient():
     # setup handler for connect and disconnect
     wsclient.on_connect = on_connect
     wsclient.on_disconnect = on_disconnect
-
+    wsclient.reconnect_delay_set(min_delay=1, max_delay=120)  # 1-120 second delays
     wsclient.connect(BROKER, PORT, 60)
+    #wsclient.loop_start()
+    #time.sleep(1)  # Allow time for connection to establish
 
 # Configure logging
 logging.basicConfig(
@@ -318,24 +334,40 @@ class BlueskyMonitor:
                 self.seen_posts.add(post_id)
                 print("="*70)
                 print(f"Total posts: {len(self.seen_posts)}")
+                # get t as UTC float
+                # post creation time
+                pt = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00')).timestamp()
+                ct = time.time()
+                delay = ct - pt
+                print(f"Delay: {delay} seconds")
                 # print time elapsed since previous post
                 if self.last_post_time:
-                    elapsed = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00')) - self.last_post_time
+                    elapsed = pt - self.last_post_time
                     # Print elapsed time in seconds
-                    print(f"Time since last post: {elapsed.total_seconds()} seconds")
-                self.last_post_time = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00'))
+                    print(f"Time since previous post: {elapsed} seconds")
+                self.last_post_time = pt
+                bonus = 0
+                if post_info['text'].find("peacedance") >= 0:
+                    bonus = 8
+                    post_peace_message()
+                msg = {'post': post_info,
+                       'pt': pt,
+                       'ct': ct,
+                       'delay': ct - pt}
+                if rateEst:
+                    print("Updating rate estimate", pt, 1+bonus)
+                    rateEst.update(pt, 1+bonus)
+                    msg['rate'] = rateEst.get_rate(pt)* 3600  # convert to events/hour
+                    print(f"Rate estimate: {msg['rate']:.4f} events/hour")
                 print(self.format_post_output(post_info))
                 if DATA_LOG_FILE:
                     print("Logging post message")
                     f = open(DATA_LOG_FILE, "a")
-                    f.write(json.dumps(post_info, indent=3) + "\n")
+                    f.write(json.dumps(msg, indent=3) + "\n")
                 if wsclient:
-                    rc = wsclient.publish(TOPIC, json.dumps(post_info))
+                    rc = wsclient.publish(TOPIC, json.dumps(msg))
                     print(f"Published to {TOPIC}")
-                     
                 new_posts_count += 1
-                if post_info['text'].find("peacedance") >= 0:
-                    post_peace_message()
 
         
         # Update cursor for next request
@@ -418,7 +450,18 @@ class BlueskyMonitor:
                 # Wait before next poll
                 logger.info(f"Waiting {self.poll_interval} seconds before next poll...")
                 time.sleep(self.poll_interval)
-                
+                if wsclient:
+                    ct = time.time()
+                    msg = {"type": "heartbeat", "ct": ct}
+                    if rateEst:
+                        msg['rate'] = rateEst.get_rate(ct) * 3600
+                        print(f"Heartbeat rate estimate: {msg['rate']:.4f} events/hour")
+                    wsclient.publish(TOPIC, json.dumps(msg))
+                    print(f"Published heartbeat to {TOPIC}")
+                    if peaceTreeClient:
+                        peaceTreeClient.set_post_rate(msg['rate'])
+                        print(f"Sent post rate to PeaceTree client")
+
             except KeyboardInterrupt:
                 logger.info("Received interrupt signal, shutting down...")
                 break
@@ -452,7 +495,8 @@ def main():
     print()
 
     startWSClient()
-    
+    startPeaceTreeClient()
+
     # Create and run monitor
     monitor = BlueskyMonitor(poll_interval=poll_interval)
     monitor.run()
