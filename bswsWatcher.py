@@ -17,12 +17,10 @@ from ExpDecayRateEstimator import ExpDecayRateEstimator
 from PeaceTreeAPI import PeaceTreeMQTTClient
 
 BROKER = "takeoneworld.com"
-#TRANSPORT = "websockets"
 TRANSPORT = "TCP"
-#PORT = 9001
 PORT = 1883
-TOPIC = "peacetreedev/api"
-TOPIC = "peacetreebsky"
+API_TOPIC = "peacetreedev/api"  # topic being watched by WLED server
+BLUESKY_TOPIC = "peacetreebsky" # topic posting bluesky info
 USER = "dkimber1179"
 PASSWORD = "d0cz3n0!2025"
 DATA_LOG_FILE = "DATA_LOG.json"
@@ -34,15 +32,14 @@ peaceTreeClient = None
 
 def startPeaceTreeClient():
     global peaceTreeClient
-    topic = "peacetreedev/api"
-    peaceTreeClient = PeaceTreeMQTTClient(BROKER, PORT, topic,
+    peaceTreeClient = PeaceTreeMQTTClient(BROKER, PORT, API_TOPIC,
                                            username=USER, password=PASSWORD)
     
 def on_connect(client, userdata, flags, rc, properties):
     print("Connected with result code:", rc)
     # Subscribe to the topic
-    #client.subscribe(TOPIC)
-    #print(f"Subscribed to topic: {TOPIC}")
+    #client.subscribe(API_TOPIC)
+    #print(f"Subscribed to topic: {API_TOPIC}")
 
 def on_disconnect(client, userdata, disconnect_flags, rc, properties):
     print("Disconnected with result code:", rc)
@@ -363,10 +360,11 @@ class BlueskyMonitor:
                 if DATA_LOG_FILE:
                     print("Logging post message")
                     f = open(DATA_LOG_FILE, "a")
-                    f.write(json.dumps(msg, indent=3) + "\n")
+                    f.write(json.dumps(msg) + "\n")
+                    f.close()
                 if wsclient:
-                    rc = wsclient.publish(TOPIC, json.dumps(msg))
-                    print(f"Published to {TOPIC}")
+                    rc = wsclient.publish(API_TOPIC, json.dumps(msg))
+                    print(f"Published to {API_TOPIC}")
                 new_posts_count += 1
 
         
@@ -447,20 +445,19 @@ class BlueskyMonitor:
                 # Periodic cleanup
                 self.cleanup_seen_posts()
                 
-                # Wait before next poll
-                logger.info(f"Waiting {self.poll_interval} seconds before next poll...")
-                time.sleep(self.poll_interval)
                 if wsclient:
                     ct = time.time()
                     msg = {"type": "heartbeat", "ct": ct}
                     if rateEst:
                         msg['rate'] = rateEst.get_rate(ct) * 3600
                         print(f"Heartbeat rate estimate: {msg['rate']:.4f} events/hour")
-                    wsclient.publish(TOPIC, json.dumps(msg))
-                    print(f"Published heartbeat to {TOPIC}")
+                    wsclient.publish(API_TOPIC, json.dumps(msg))
+                    print(f"Published heartbeat to {API_TOPIC}")
                     if peaceTreeClient:
                         peaceTreeClient.set_post_rate(msg['rate'])
-                        print(f"Sent post rate to PeaceTree client")
+                # Wait before next poll
+                logger.info(f"Waiting {self.poll_interval} seconds before next poll...")
+                time.sleep(self.poll_interval)
 
             except KeyboardInterrupt:
                 logger.info("Received interrupt signal, shutting down...")
