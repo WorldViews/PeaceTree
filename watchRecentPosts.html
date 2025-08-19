@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Recent Posts</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 2em;
+        }
+
+        #posts {
+            margin-top: 1em;
+        }
+
+        .post {
+            border-bottom: 1px solid #ccc;
+            padding: 1em 0;
+        }
+
+        .post:last-child {
+            border-bottom: none;
+        }
+
+        .timestamp {
+            color: #888;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Recent Posts</h1>
+    <div id="header"></div>
+    <div id="posts">Loading...</div>
+    <script>
+        // function that is given a timestamp string and returns the elapsed time since that timestamp
+        function getElapsedTime(timestamp) {
+            const postTime = new Date(timestamp);
+            const now = new Date();
+            const elapsed = now - postTime;
+            const seconds = Math.floor(elapsed / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            if (hours > 0) return `${hours}h ago`;
+            if (minutes > 0) return `${minutes}m ago`;
+            return `${seconds}s ago`;
+        }
+
+        async function fetchAndDisplayPosts() {
+            console.log("Fetching recent posts...");
+            try {
+                const response = await fetch('RECENT_POSTS.json', { cache: "no-store" });
+                if (!response.ok) throw new Error('Network response was not ok');
+                // 
+                const rpObj = await response.json();
+                const rate = rpObj.rate || 0;
+                const postsArray = rpObj.posts || [];
+                console.log("Fetched posts:", postsArray);
+                postsArray.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                const headerDiv = document.getElementById('header');
+                // show rate to 1 decimal place
+                headerDiv.innerHTML = `<h2>Peace Score: ${rate.toFixed(1)}</h2>`;
+                const postsDiv = document.getElementById('posts');
+                if (!Array.isArray(postsArray) || postsArray.length === 0) {
+                    postsDiv.innerHTML = '<em>No recent posts.</em>';
+                    return;
+                }
+                // Then show text and timestamps, no titles
+                // After timestamps, show elapsed time since that timestamp to
+                // current time
+                postsDiv.innerHTML = postsArray.map(post => `
+                    <div class="post">
+                        <div>${post.text || ''}</div>
+                        <div class="timestamp">${post.createdAt || ''} (${getElapsedTime(post.createdAt)})</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                document.getElementById('posts').innerHTML = '<em>Error loading posts.</em>';
+            }
+        }
+
+        fetchAndDisplayPosts();
+        setInterval(fetchAndDisplayPosts, 15000);
+    </script>
+</body>
+
+</html>
