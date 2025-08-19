@@ -58,7 +58,7 @@
                 const rate = rpObj.rate || 0;
                 const postsArray = rpObj.posts || [];
                 console.log("Fetched posts:", postsArray);
-                postsArray.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                postsArray.sort((a, b) => new Date(b.post.createdAt) - new Date(a.post.createdAt));
                 const headerDiv = document.getElementById('header');
                 // show rate to 1 decimal place
                 headerDiv.innerHTML = `<h2>Peace Score: ${rate.toFixed(1)}</h2>`;
@@ -69,13 +69,17 @@
                 }
                 // Then show text and timestamps, no titles
                 // After timestamps, show elapsed time since that timestamp to
-                // current time
-                postsDiv.innerHTML = postsArray.map(post => `
+                // current time.  Finally, if the post has a 'rate' show it to one decimal place.
+                postsDiv.innerHTML = postsArray.map(msg => {
+                    const post = msg.post || {};
+                    return `
                     <div class="post">
                         <div>${post.text || ''}</div>
-                        <div class="timestamp">${post.createdAt || ''} (${getElapsedTime(post.createdAt)})</div>
-                    </div>
-                `).join('');
+                        <div class="timestamp">${post.createdAt || ''} (${getElapsedTime(post.createdAt)})
+                        ${msg.rate ? ` rate: ${msg.rate.toFixed(1)}` : ''}
+                        </div>
+                    </div>`
+                }).join('');
             } catch (err) {
                 document.getElementById('posts').innerHTML = '<em>Error loading posts.</em>';
             }

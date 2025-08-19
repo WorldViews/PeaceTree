@@ -28,9 +28,33 @@ DATA_LOG_FILE = "DATA_LOG.json"
 wsclient = None
 rateEst = ExpDecayRateEstimator(1/500.0)  # Example alpha value for decay rate
 peaceTreeClient = None
-recentPosts = []
+
 RECENT_POSTS_FILE = "RECENT_POSTS.json"
-MAX_NUM_RECENT_POSTS = 20
+MAX_NUM_RECENT_POSTS = 25
+
+# Class for keeping track of recent posts
+# and some state like rate.
+class RecentPosts:
+    def __init__(self):
+        self.rate = 0.0
+        self.posts = []
+
+    def add_post(self, post: Dict[str, Any]):
+        self.posts.append(post)
+        if len(self.posts) > MAX_NUM_RECENT_POSTS:
+            self.posts.pop(0)
+
+    def set_rate(self, rate: float):
+        self.rate = rate
+
+    def save(self):
+        rpObj = {'posts': self.posts,
+                 'rate': self.rate,
+                 'updated_at': datetime.now(timezone.utc).isoformat()}
+        with open(RECENT_POSTS_FILE, "w") as f:
+            json.dump(rpObj, f)
+
+recentPosts = RecentPosts()
 
 def startPeaceTreeClient():
     global peaceTreeClient
@@ -259,7 +283,10 @@ class BlueskyMonitor:
             text_lower = text.lower()
             if not any(hashtag.lower() in text_lower for hashtag in self.hashtags):
                 return None
-                
+            # get media url if any
+            media = record.get('media', [])
+            media_urls = [item.get('url', '') for item in media]    
+
             # Extract post info
             post_info = {
                 'uri': post.get('uri', ''),
@@ -269,6 +296,7 @@ class BlueskyMonitor:
                     'displayName': author.get('displayName', ''),
                 },
                 'text': text,
+                'media': media_urls,
                 'createdAt': record.get('createdAt', ''),
                 'replyCount': post.get('replyCount', 0),
                 'repostCount': post.get('repostCount', 0),
@@ -350,6 +378,7 @@ class BlueskyMonitor:
                     bonus = 8
                     post_peace_message()
                 msg = {'post': post_info,
+                       'type': 'post',
                        'pt': pt,
                        'ct': ct,
                        'delay': ct - pt}
@@ -365,21 +394,12 @@ class BlueskyMonitor:
                     f.write(json.dumps(msg) + "\n")
                     f.close()
                 if recentPosts != None:
-                    recentPosts.append(post_info)
-                    if len(recentPosts) > MAX_NUM_RECENT_POSTS:
-                        recentPosts.pop(0)
-                    f = open(RECENT_POSTS_FILE, "w")
-                    rpobj = {'posts':recentPosts}
-                    if rateEst:
-                        rpobj['rate'] = rateEst.get_rate(pt)* 3600  # convert to events/hour
-                    f.write(json.dumps(rpobj) + "\n")
-                    f.close()
+                    recentPosts.add_post(msg)
                 if wsclient:
-                    rc = wsclient.publish(API_TOPIC, json.dumps(msg))
-                    print(f"Published to {API_TOPIC}")
+                    rc = wsclient.publish(BLUESKY_TOPIC, json.dumps(msg), retain=True)
+                    print(f"Published to {BLUESKY_TOPIC}")
                 new_posts_count += 1
 
-        
         # Update cursor for next request
         self.cursor = results.get('cursor')
         
@@ -450,6 +470,12 @@ class BlueskyMonitor:
                 
                 if total_new_posts:
                     logger.info(f"Total new posts this cycle: {total_new_posts}")
+
+                ct = time.time()
+                if recentPosts:
+                    if rateEst:
+                        recentPosts.set_rate(rateEst.get_rate(ct)* 3600)
+                    recentPosts.save()
                 
                 # Reset error counter on successful cycle
                 consecutive_errors = 0
@@ -463,8 +489,8 @@ class BlueskyMonitor:
                     if rateEst:
                         msg['rate'] = rateEst.get_rate(ct) * 3600
                         print(f"Heartbeat rate estimate: {msg['rate']:.4f} events/hour")
-                    wsclient.publish(API_TOPIC, json.dumps(msg))
-                    print(f"Published heartbeat to {API_TOPIC}")
+                    wsclient.publish(BLUESKY_TOPIC, json.dumps(msg), retain=True)
+                    print(f"Published heartbeat to {BLUESKY_TOPIC}")
                     if peaceTreeClient:
                         peaceTreeClient.set_post_rate(msg['rate'])
                 # Wait before next poll
