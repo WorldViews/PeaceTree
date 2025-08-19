@@ -27,8 +27,10 @@ DATA_LOG_FILE = "DATA_LOG.json"
 
 wsclient = None
 rateEst = ExpDecayRateEstimator(1/500.0)  # Example alpha value for decay rate
-
 peaceTreeClient = None
+recentPosts = []
+RECENT_POSTS_FILE = "RECENT_POSTS.json"
+MAX_NUM_RECENT_POSTS = 20
 
 def startPeaceTreeClient():
     global peaceTreeClient
@@ -361,6 +363,16 @@ class BlueskyMonitor:
                     print("Logging post message")
                     f = open(DATA_LOG_FILE, "a")
                     f.write(json.dumps(msg) + "\n")
+                    f.close()
+                if recentPosts != None:
+                    recentPosts.append(post_info)
+                    if len(recentPosts) > MAX_NUM_RECENT_POSTS:
+                        recentPosts.pop(0)
+                    f = open(RECENT_POSTS_FILE, "w")
+                    rpobj = {'posts':recentPosts}
+                    if rateEst:
+                        rpobj['rate'] = rateEst.get_rate(pt)* 3600  # convert to events/hour
+                    f.write(json.dumps(rpobj) + "\n")
                     f.close()
                 if wsclient:
                     rc = wsclient.publish(API_TOPIC, json.dumps(msg))
