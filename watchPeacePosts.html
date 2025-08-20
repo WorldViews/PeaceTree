@@ -16,7 +16,13 @@
 
         .new {
             background-color: #e0f7fa;
+            color: darkblue;
             padding: 1em;
+        }
+
+        .author {
+            font-weight: bold;
+            color: #00796b;
         }
 
         .post {
@@ -151,7 +157,8 @@
                     postsDiv.innerHTML = '<em>No recent posts.</em>';
                     return;
                 }
-                // Then show text and timestamps, no titles
+                // Then show author handle and display name, followed by text and
+                // timestamps, no titles
                 // After timestamps, show elapsed time since that timestamp to
                 // current time.  Finally, if the post has a 'rate' show it to one
                 // decimal place.
@@ -162,6 +169,7 @@
                     if (peObj.isNew) numNewPosts++;
                     return `
                     <div class="post ${peObj.isNew ? 'new' : ''}">
+                        <div class="author">${post.author?.displayName || post.author?.handle || ''}</div>
                         <div>${post.text || ''}</div>
                         <div class="timestamp">${post.createdAt || ''} (${getElapsedTime(post.createdAt)})
                         ${peObj.rate ? ` rate: ${peObj.rate.toFixed(1)}` : ''}
