@@ -14,6 +14,11 @@
             margin-top: 1em;
         }
 
+        .new {
+            background-color: #e0f7fa;
+            padding: 1em;
+        }
+
         .post {
             border-bottom: 1px solid #ccc;
             padding: 1em 0;
@@ -31,15 +36,27 @@
 </head>
 
 <body>
-    <h1>Recent Posts</h1>
+    <h1>Recent Peace Posts</h1>
     <div id="header"></div>
     <div id="posts">Loading...</div>
     <script>
 
+        /*
+        This web page displays recent posts related to peace.   It works by fetching
+        RECENT_POSTS.json which contains an rpObj object produced by a BlueSky scraper which
+        finds recent posts about peace.   rpObj.posts is the array of post event objects.  Each
+        post event object peObj contains metadata, and peObj.post contains the actual post content.
+        
+        This program keeps a list of all the posts it has previously fetched, and when it fetches new
+        recent posts, it updates its list of posts.   It keeps track of which posts are new by using
+        the post's uri field, which is unique for the post.
+        */
         let audioContext = null;
+        let postEvents = [];
+        let postEventsByURI = {};
 
         // Create Buddhist gong sound using Web Audio API
-        function createGongSound() {
+        function playGongSound() {
             if (!audioContext) {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
@@ -96,7 +113,7 @@
         }
 
         async function fetchAndDisplayPosts() {
-            createGongSound();
+            //playGongSound();
             console.log("Fetching recent posts...");
             try {
                 const response = await fetch('RECENT_POSTS.json', { cache: "no-store" });
@@ -104,30 +121,59 @@
                 // 
                 const rpObj = await response.json();
                 const rate = rpObj.rate || 0;
-                const postsArray = rpObj.posts || [];
-                console.log("Fetched posts:", postsArray);
-                postsArray.sort((a, b) => new Date(b.post.createdAt) - new Date(a.post.createdAt));
+                const recentPostEventsArray = rpObj.posts || [];
+                console.log("Fetched posts:", recentPostEventsArray);
+                // compare this with existing post events and update
+                // postEventObjs and postEventObjByURI accordingly
+                recentPostEventsArray.forEach(peObj => {
+                    const uri = peObj.post.uri
+                    console.log("Processing post event object:", uri);
+                    const existing = postEventsByURI[uri];
+                    if (existing) {
+                        console.log("Updating existing post event:", existing);
+                        // Update existing post event
+                        //Object.assign(existing, peObj);
+                        existing.isNew = false;
+                    } else {
+                        // Add new post event
+                        console.log("New post event:", peObj);
+                        peObj.isNew = true;
+                        postEvents.push(peObj);
+                        postEventsByURI[uri] = peObj;
+                    }
+                });
+                postEvents.sort((a, b) => new Date(b.post.createdAt) - new Date(a.post.createdAt));
                 const headerDiv = document.getElementById('header');
                 // show rate to 1 decimal place
                 headerDiv.innerHTML = `<h2>Peace Score: ${rate.toFixed(1)}</h2>`;
                 const postsDiv = document.getElementById('posts');
-                if (!Array.isArray(postsArray) || postsArray.length === 0) {
+                if (!Array.isArray(postEvents) || postEvents.length === 0) {
                     postsDiv.innerHTML = '<em>No recent posts.</em>';
                     return;
                 }
                 // Then show text and timestamps, no titles
                 // After timestamps, show elapsed time since that timestamp to
-                // current time.  Finally, if the post has a 'rate' show it to one decimal place.
-                postsDiv.innerHTML = postsArray.map(msg => {
-                    const post = msg.post || {};
+                // current time.  Finally, if the post has a 'rate' show it to one
+                // decimal place.
+                // If the post is new, add a special class that renders it in blue
+                let numNewPosts = 0;
+                postsDiv.innerHTML = postEvents.map(peObj => {
+                    const post = peObj.post || {};
+                    if (peObj.isNew) numNewPosts++;
                     return `
-                    <div class="post">
+                    <div class="post ${peObj.isNew ? 'new' : ''}">
                         <div>${post.text || ''}</div>
                         <div class="timestamp">${post.createdAt || ''} (${getElapsedTime(post.createdAt)})
-                        ${msg.rate ? ` rate: ${msg.rate.toFixed(1)}` : ''}
+                        ${peObj.rate ? ` rate: ${peObj.rate.toFixed(1)}` : ''}
                         </div>
                     </div>`
                 }).join('');
+                console.log("numNewPosts:", numNewPosts);
+                if (numNewPosts > 0) {
+                    playGongSound();
+                    // play gong again in 0.5 seconds
+                    setTimeout(playGongSound, 500);
+                }
             } catch (err) {
                 document.getElementById('posts').innerHTML = '<em>Error loading posts.</em>';
             }
