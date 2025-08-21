@@ -283,9 +283,8 @@ class BlueskyMonitor:
             text_lower = text.lower()
             if not any(hashtag.lower() in text_lower for hashtag in self.hashtags):
                 return None
-            # get media url if any
-            media = record.get('media', [])
-            media_urls = [item.get('url', '') for item in media]    
+            # get media url if any from the bluesky embed
+            embed = record.get('embed', [])
 
             # Extract post info
             post_info = {
@@ -296,7 +295,7 @@ class BlueskyMonitor:
                     'displayName': author.get('displayName', ''),
                 },
                 'text': text,
-                'media': media_urls,
+                'embed': embed,
                 'createdAt': record.get('createdAt', ''),
                 'replyCount': post.get('replyCount', 0),
                 'repostCount': post.get('repostCount', 0),
