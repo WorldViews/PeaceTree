@@ -97,13 +97,19 @@ is periodically updated.
         }
 
         class Chart {
-            constructor(canvas) {
+            constructor() {
+                const chartDiv = document.getElementById('chart');
+                const canvas = document.createElement('canvas');
+                // set width to "90%"
+                canvas.style.width = "90%";
+                canvas.style.height = "160px";
+                chartDiv.appendChild(canvas);
                 this.canvas = canvas;
                 this.ctx = canvas.getContext('2d');
                 this.width = canvas.width;
                 this.height = canvas.height;
                 this.viewDuration = 3600; // 1 hour
-                this.draw();
+                //this.draw();
             }
 
             zoom(zf = 1.2) {
@@ -145,6 +151,8 @@ is periodically updated.
 
             // get and draw events from recentEvents
             drawEvents() {
+                if (!postEvents || postEvents.length === 0) return;
+
                 for (const event of postEvents) {
                     // get width and height
                     let cw = this.ctx.canvas.width;
@@ -173,6 +181,12 @@ is periodically updated.
                 }
                 this.ctx.strokeStyle = 'blue';
                 this.ctx.stroke();
+            }
+        }
+
+        function updateChart() {
+            if (chart) {
+                chart.draw();
             }
         }
 
@@ -231,21 +245,6 @@ is periodically updated.
             if (hours > 0) return `${hours}h ago`;
             if (minutes > 0) return `${minutes}m ago`;
             return `${seconds}s ago`;
-        }
-
-        // this function updates the chart display showing post events and an
-        // envolope of rates
-        function updateChart() {
-            if (chart == null) {
-                const chartDiv = document.getElementById('chart');
-                const canvas = document.createElement('canvas');
-                // set width to "90%"
-                canvas.style.width = "90%";
-                canvas.style.height = "160px";
-                chartDiv.appendChild(canvas);
-                chart = new Chart(canvas);
-            }
-            chart.draw();
         }
 
         // Fetch recent posts and display them
@@ -316,7 +315,9 @@ is periodically updated.
             } catch (err) {
                 document.getElementById('posts').innerHTML = '<em>Error loading posts.</em>';
             }
-            updateChart();
+            if (chart) {
+                chart.draw();
+            }
         }
 
         async function fetchData() {
@@ -397,7 +398,10 @@ is periodically updated.
             return postEvts;
         }
 
+        chart = new Chart();
         fetchAndDisplayPosts();
+
+
         setInterval(fetchAndDisplayPosts, 15000);
         setInterval(updateChart, 100);
     </script>
