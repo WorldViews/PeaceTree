@@ -433,7 +433,7 @@ is periodically updated.
         async function loadData() {
             if (eventsFromDATA) {
                 // If we have already loaded events, just use them
-                postEvents = eventsFromDATA;
+                return;
             }
             const postEvts = await fetchData();
             // update postEvents
@@ -455,8 +455,8 @@ is periodically updated.
                 }
             });
             // sort postEvents
-            postEvents.sort((a, b) => new Date(b.post.createdAt) - new Date(a.post.createdAt));
-            return postEvts;
+            postEvents.sort((a, b) =>
+                new Date(b.post.createdAt) - new Date(a.post.createdAt));
         }
 
         chart = new Chart();
