@@ -59,15 +59,25 @@ is periodically updated.
 
 <body>
     <h1>Recent Peace Posts</h1>
-    <span id="" buttons">
-        <input type="checkbox" id="sounds"> sounds
-        &nbsp; &nbsp;
-        <input type="button" value="Zoom In" onclick="chart.zoom(0.8)">
-        <input type="button" value="Zoom Out" onclick="chart.zoom(1.2)">
-        <input type="button" id="date" value="data" onclick="loadData()">
-    </span>
     <div id="header"></div>
     <div id="chart"></div>
+    <div style="position: relative; width: 90%; margin-top: 4px; height: 1.8em;">
+        <span id="currentTimeStr" style="font-size: 0.95em; color: #555; position: absolute; left: 0; top: 0;"></span>
+        <div id="buttons"
+            style="position: absolute; left: 50%; top: 0; transform: translateX(-50%); display: inline-block; text-align: center;">
+            <input type="checkbox" id="sounds" onchange="onAudioCheckboxChange()"> sounds
+            &nbsp; &nbsp;
+            <input type="button" value="1 Hour" onclick="chart.setViewDuration(3600)">
+            <input type="button" value="12 Hours" onclick="chart.setViewDuration(43200)">
+            <input type="button" value="1 Day" onclick="chart.setViewDuration(86400)">
+            <input type="button" value="..." onclick="chart.setViewFull()">
+            &nbsp; &nbsp;
+            <input type="button" value="In" onclick="chart.zoom(0.8)">
+            <input type="button" value="Out" onclick="chart.zoom(1.2)">
+        </div>
+        <span id="startTimeStr"
+            style="font-size: 0.95em; color: #555; position: absolute; right: 0; top: 0; text-align: right;"></span>
+    </div>
     <div id="posts">Loading...</div>
     <script>
 
@@ -85,7 +95,7 @@ is periodically updated.
         let postEvents = [];
         let postEventsByURI = {};
         let chart = null;
-        let eventsFromDATA = [];
+        let eventsFromDATA = null;
 
         // Chart class
         // shows recent posts with the horizontal dimension representing time.
@@ -94,6 +104,15 @@ is periodically updated.
 
         function getCurrentClockTime() {
             return Math.floor(Date.now() / 1000);
+        }
+
+        // write function that gets called when "audio" checkbox
+        // changes.   If it goes to true, call playAudio()
+        function onAudioCheckboxChange() {
+            const audioCheckbox = document.getElementById('sounds');
+            if (audioCheckbox.checked) {
+                playAudio();
+            }
         }
 
         class Chart {
@@ -117,8 +136,20 @@ is periodically updated.
                 this.draw();
             }
 
-            setViewDuration(seconds) {
+            async setViewDuration(seconds) {
+                if (seconds > 69) {
+                    await loadData();
+                }
                 this.viewDuration = seconds;
+                this.draw();
+            }
+
+            async setViewFull() {
+                await loadData();
+                if (postEvents.length === 0) return;
+                const now = getCurrentClockTime();
+                const oldestPostTime = Math.floor(new Date(postEvents[postEvents.length - 1].post.createdAt).getTime() / 1000);
+                this.viewDuration = now - oldestPostTime + 60; // add 60 seconds buffer
                 this.draw();
             }
 
@@ -174,6 +205,8 @@ is periodically updated.
 
             // draw line connecting post events
             drawLine() {
+                if (!postEvents || postEvents.length === 0) return;
+
                 this.ctx.beginPath();
                 this.ctx.moveTo(50, 290 - postEvents[0].value);
                 for (let i = 1; i < postEvents.length; i++) {
@@ -184,9 +217,25 @@ is periodically updated.
             }
         }
 
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            // Format: MM/DD/YY HH:MM:SS
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            const yy = String(date.getFullYear()).slice(-2);
+            const time = date.toLocaleTimeString();
+            return `${mm}/${dd}/${yy} ${time}`;
+        }
+
         function updateChart() {
             if (chart) {
                 chart.draw();
+                // Update time labels under chart
+                const currentTimeLabel = document.getElementById('currentTimeStr');
+                const startTimeLabel = document.getElementById('startTimeStr');
+                const now = getCurrentClockTime();
+                currentTimeLabel.textContent = formatTime(now);
+                startTimeLabel.textContent = formatTime(now - chart.viewDuration);
             }
         }
 
@@ -234,6 +283,13 @@ is periodically updated.
             source.start();
         }
 
+        function playAudio() {
+            // if checkbox is checked, playGongSound
+            if (document.getElementById('sounds').checked) {
+                playGongSound();
+            }
+        }
+
         // function that is given a timestamp string and returns the elapsed time since that timestamp
         function getElapsedTime(timestamp) {
             const postTime = new Date(timestamp);
@@ -247,7 +303,10 @@ is periodically updated.
             return `${seconds}s ago`;
         }
 
-        // Fetch recent posts and display them
+        // Fetch recent posts and display them.  Ideally this will be
+        // replaced by code that uses websockets to update each new post
+        // but for not this reloads the file of recent posts, and ignores
+        // posts that have already been loaded
         async function fetchAndDisplayPosts() {
             //playGongSound();
             console.log("Fetching recent posts...");
@@ -308,9 +367,7 @@ is periodically updated.
                 }).join('');
                 console.log("numNewPosts:", numNewPosts);
                 if (numNewPosts > 0) {
-                    playGongSound();
-                    // play gong again in 0.5 seconds
-                    setTimeout(playGongSound, 500);
+                    playAudio();
                 }
             } catch (err) {
                 document.getElementById('posts').innerHTML = '<em>Error loading posts.</em>';
@@ -374,6 +431,10 @@ is periodically updated.
         }
 
         async function loadData() {
+            if (eventsFromDATA) {
+                // If we have already loaded events, just use them
+                postEvents = eventsFromDATA;
+            }
             const postEvts = await fetchData();
             // update postEvents
             postEvts.forEach(pEvt => {
