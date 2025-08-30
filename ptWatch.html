@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+This HTML document displays recent posts related to peace.
+It also displays a chart of post engagement over time.  The chart reads
+left to right, with the left edge corresponding to the current time, and
+positions to the right shows past posts.   The chart shows both a marker
+for the post, and an evelope function above the markers that is a smoothed
+estimate of the rate.
+
+The posts, and times associated with them are in the postEvents array which
+is periodically updated.
+-->
+
+<head>
+    <meta charset="UTF-8">
+    <title>Recent Posts</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 2em;
+        }
+
+        #posts {
+            margin-top: 1em;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            margin-top: 1em;
+        }
+
+        .new {
+            background-color: #e0f7fa;
+            color: darkblue;
+            padding: 1em;
+        }
+
+        .author {
+            font-weight: bold;
+            color: #00796b;
+        }
+
+        .post {
+            border-bottom: 1px solid #ccc;
+            padding: 1em 0;
+        }
+
+        .post:last-child {
+            border-bottom: none;
+        }
+
+        .timestamp {
+            color: #888;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Recent Peace Posts</h1>
+    <div id="header"></div>
+    <div id="chart"></div>
+    <div style="position: relative; width: 90%; margin-top: 4px; height: 1.8em;">
+        <span id="currentTimeStr" style="font-size: 0.95em; color: #555; position: absolute; left: 0; top: 0;"></span>
+        <div id="buttons"
+            style="position: absolute; left: 50%; top: 0; transform: translateX(-50%); display: inline-block; text-align: center;">
+            <input type="checkbox" id="sounds" onchange="onAudioCheckboxChange()"> sounds
+            &nbsp; &nbsp;
+            <input type="button" value="1 Hour" onclick="chart.setViewDuration(3600)">
+            <input type="button" value="12 Hours" onclick="chart.setViewDuration(43200)">
+            <input type="button" value="1 Day" onclick="chart.setViewDuration(86400)">
+            <input type="button" value="..." onclick="chart.setViewFull()">
+            &nbsp; &nbsp;
+            <input type="button" value="In" onclick="chart.zoom(0.8)">
+            <input type="button" value="Out" onclick="chart.zoom(1.2)">
+        </div>
+        <span id="startTimeStr"
+            style="font-size: 0.95em; color: #555; position: absolute; right: 0; top: 0; text-align: right;"></span>
+    </div>
+    <div id="posts">Loading...</div>
+    <script>
+
+        /*
+        This web page displays recent posts related to peace.   It works by fetching
+        RECENT_POSTS.json which contains an rpObj object produced by a BlueSky scraper which
+        finds recent posts about peace.   rpObj.posts is the array of post event objects.  Each
+        post event object peObj contains metadata, and peObj.post contains the actual post content.
+        
+        This program keeps a list of all the posts it has previously fetched, and when it fetches new
+        recent posts, it updates its list of posts.   It keeps track of which posts are new by using
+        the post's uri field, which is unique for the post.
+        */
+        let audioContext = null;
+        let postEvents = [];
+        let postEventsByURI = {};
+        let chart = null;
+        let eventsFromDATA = null;
+
+        // Chart class
+        // shows recent posts with the horizontal dimension representing time.
+        // The left edge is the current time, and the right edge represents time
+        // delay seconds into the past.   For now, delay is taken as one hour.
+
+        function getCurrentClockTime() {
+            return Math.floor(Date.now() / 1000);
+        }
+
+        // write function that gets called when "audio" checkbox
+        // changes.   If it goes to true, call playAudio()
+        function onAudioCheckboxChange() {
+            const audioCheckbox = document.getElementById('sounds');
+            if (audioCheckbox.checked) {
+                playAudio();
+            }
+        }
+
+        class Chart {
+            constructor() {
+                const chartDiv = document.getElementById('chart');
+                const canvas = document.createElement('canvas');
+                // set width to "90%"
+                canvas.style.width = "90%";
+                canvas.style.height = "160px";
+                chartDiv.appendChild(canvas);
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.width = canvas.width;
+                this.height = canvas.height;
+                this.viewDuration = 3600; // 1 hour
+                //this.draw();
+            }
+
+            zoom(zf = 1.2) {
+                this.viewDuration *= zf;
+                this.draw();
+            }
+
+            async setViewDuration(seconds) {
+                if (seconds > 69) {
+                    await loadLongTermData();
+                }
+                this.viewDuration = seconds;
+                this.draw();
+            }
+
+            async setViewFull() {
+                await loadLongTermData();
+                if (postEvents.length === 0) return;
+                const now = getCurrentClockTime();
+                const oldestPostTime = Math.floor(new Date(postEvents[postEvents.length - 1].post.createdAt).getTime() / 1000);
+                this.viewDuration = now - oldestPostTime + 60; // add 60 seconds buffer
+                this.draw();
+            }
+
+            draw() {
+                this.ct = getCurrentClockTime();
+
+                // Clear previous chart
+                this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+
+                // Draw axes
+                this.drawAxes();
+
+                // Draw events
+                this.drawEvents();
+            }
+
+            drawAxes() {
+                // use canvas width and height to determine axis positions
+                let w = this.ctx.canvas.width;
+                let h = this.ctx.canvas.height;
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, 0);
+                this.ctx.lineTo(0, h - 1);
+                this.ctx.lineTo(w - 1, h - 1);
+                this.ctx.stroke();
+            }
+
+            // get and draw events from recentEvents
+            drawEvents() {
+                if (!postEvents || postEvents.length === 0) {
+                    return;
+                }
+                for (const event of postEvents) {
+                    // get width and height
+                    let cw = this.ctx.canvas.width;
+                    let ch = this.ctx.canvas.height;
+
+                    let r = event.rate || 10;
+                    let style = "black";
+                    let pt = event.pt; // event.timestamp in seconds
+                    if (event.type === "rtweb_post") {
+                        style = "blue";
+                    }
+                    // compute dt:  time in seconds since event.timestamp
+                    const dt = (this.ct - pt);
+                    //console.log("dt:", dt, event);
+                    // map dt to x position
+                    const dur = this.viewDuration;
+                    const x = 1 + (dt / dur) * cw;
+                    const y = ch - 2; // Map value to y position
+                    const w = 0.8;
+                    const h = r;
+                    this.ctx.fillStyle = style;
+                    this.ctx.strokeStyle = style;
+                    this.ctx.fillRect(x, y - h, w, h);
+                    this.ctx.strokeRect(x, y - h, w, h);
+                }
+            }
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            // Format: MM/DD/YY HH:MM:SS
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            const yy = String(date.getFullYear()).slice(-2);
+            const time = date.toLocaleTimeString();
+            return `${mm}/${dd}/${yy} ${time}`;
+        }
+
+        function updateChart() {
+            if (chart) {
+                chart.draw();
+                // Update time labels under chart
+                const currentTimeLabel = document.getElementById('currentTimeStr');
+                const startTimeLabel = document.getElementById('startTimeStr');
+                const now = getCurrentClockTime();
+                currentTimeLabel.textContent = formatTime(now);
+                startTimeLabel.textContent = formatTime(now - chart.viewDuration);
+            }
+        }
+
+        // Create Buddhist gong sound using Web Audio API
+        function playGongSound() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            const duration = 3; // 3 seconds
+            const sampleRate = audioContext.sampleRate;
+            const buffer = audioContext.createBuffer(1, duration * sampleRate, sampleRate);
+            const data = buffer.getChannelData(0);
+
+            // Generate gong-like sound with multiple harmonics
+            for (let i = 0; i < buffer.length; i++) {
+                const t = i / sampleRate;
+                const envelope = Math.exp(-t * 2); // Exponential decay
+
+                // Multiple frequencies for rich gong sound
+                const fundamental = 220; // Base frequency
+                let sample = 0;
+                sample += Math.sin(2 * Math.PI * fundamental * t) * 0.3;
+                sample += Math.sin(2 * Math.PI * fundamental * 1.5 * t) * 0.2;
+                sample += Math.sin(2 * Math.PI * fundamental * 2.2 * t) * 0.15;
+                sample += Math.sin(2 * Math.PI * fundamental * 3.1 * t) * 0.1;
+                sample += Math.sin(2 * Math.PI * fundamental * 4.7 * t) * 0.05;
+
+                // Add some noise for metallic quality
+                sample += (Math.random() - 0.5) * 0.02 * envelope;
+
+                data[i] = sample * envelope * 0.3; // Keep volume moderate
+            }
+
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+
+            // Add reverb-like effect
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0.7, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+            source.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            source.start();
+        }
+
+        function playAudio() {
+            // if checkbox is checked, playGongSound
+            if (document.getElementById('sounds').checked) {
+                playGongSound();
+            }
+        }
+
+        // function that is given a timestamp string and returns the elapsed time since that timestamp
+        function getElapsedTime(timestamp) {
+            const postTime = new Date(timestamp);
+            const now = new Date();
+            const elapsed = now - postTime;
+            const seconds = Math.floor(elapsed / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            if (hours > 0) return `${hours}h ago`;
+            if (minutes > 0) return `${minutes}m ago`;
+            return `${seconds}s ago`;
+        }
+
+        // Fetch recent posts and display them.  Ideally this will be
+        // replaced by code that uses websockets to update each new post
+        // but for not this reloads the file of recent posts, and ignores
+        // posts that have already been loaded
+        async function fetchAndDisplayPosts() {
+            //playGongSound();
+            console.log("Fetching recent posts...");
+            try {
+                const response = await fetch('RECENT_POSTS.json', { cache: "no-store" });
+                if (!response.ok) throw new Error('Network response was not ok');
+                // 
+                const rpObj = await response.json();
+                const rate = rpObj.rate || 0;
+                const recentPostEventsArray = rpObj.posts || [];
+                //console.log("Fetched posts:", recentPostEventsArray);
+                // compare this with existing post events and update
+                // postEventObjs and postEventObjByURI accordingly
+                recentPostEventsArray.forEach(peObj => {
+                    const uri = peObj.post.uri
+                    console.log("Processing post event object:", uri);
+                    let existing = postEventsByURI[uri];
+                    if (existing) {
+                        console.log("Updating existing post event:", existing);
+                        existing.isNew = false;
+                    } else {
+                        // Add new post event
+                        console.log("New post event:", peObj);
+                        peObj.isNew = true;
+                        postEvents.push(peObj);
+                        postEventsByURI[uri] = peObj; // <-- Add this line
+                    }
+                });
+                postEvents.sort((a, b) => new Date(b.post.createdAt) - new Date(a.post.createdAt));
+                const headerDiv = document.getElementById('header');
+                // show rate to 1 decimal place
+                headerDiv.innerHTML = `<h2>Peace Score: ${rate.toFixed(1)}</h2>`;
+                const postsDiv = document.getElementById('posts');
+                if (!Array.isArray(postEvents) || postEvents.length === 0) {
+                    postsDiv.innerHTML = '<em>No recent posts.</em>';
+                    return;
+                }
+                // Then show author handle and display name, followed by text and
+                // timestamps, no titles
+                // After timestamps, show elapsed time since that timestamp to
+                // current time.  Finally, if the post has a 'rate' show it to one
+                // decimal place.
+                // If the post is new, add a special css class that renders it in blue
+                let numNewPosts = 0;
+                postsDiv.innerHTML = postEvents.map(peObj => {
+                    const post = peObj.post || {};
+                    if (peObj.isNew) numNewPosts++;
+                    return `
+                    <div class="post ${peObj.isNew ? 'new' : ''}">
+                        <div class="author">${post.author?.displayName || post.author?.handle || ''}</div>
+                        <div>${post.text || ''}</div>
+                        <div class="timestamp">${post.createdAt || ''} (${getElapsedTime(post.createdAt)})
+                        ${peObj.rate ? ` rate: ${peObj.rate.toFixed(1)}` : ''}
+                        </div>
+                    </div>`
+                }).join('');
+                console.log("numNewPosts:", numNewPosts);
+                if (numNewPosts > 0) {
+                    playAudio();
+                }
+            } catch (err) {
+                document.getElementById('posts').innerHTML = '<em>Error loading posts.</em>';
+            }
+            if (chart) {
+                chart.draw();
+            }
+        }
+
+        // load JSONs from jsonl file "DATA_LOG.json"
+        // that file is a sequence of JSON's, one per line
+        async function fetchLongTermData() {
+            const startTime = getCurrentClockTime();
+            const response = await fetch('DATA_LOG.json');
+            const data = await response.text();
+            const jsonLines = data.split('\n').filter(line => line.trim() !== '');
+            console.log("Num lines read:", jsonLines.length);
+            let postEvents = [];
+            let partialLine = null;
+            let numMultilineJSONs = 0;
+            let numBadJSONs = 0;
+            jsonLines.forEach(line => {
+                if (partialLine) {
+                    partialLine = partialLine + line;
+                    if (line.trim() == '}') {
+                        line = partialLine;
+                        partialLine = null;
+                    }
+                    else {
+                        return;
+                    }
+                }
+                // check if line is just "{"
+                if (line.trim() == "{") {
+                    partialLine = line;
+                    numMultilineJSONs++;
+                    return;
+                }
+                //console.log("Loading post:", line);
+                try {
+                    const evObj = JSON.parse(line);
+                    if (evObj.post == null) {
+                        console.log("skipping non-post event:", evObj);
+                        return;
+                    }
+                    if (!evObj.type) {
+                        console.log("No event type found, defaulting to 'post'");
+                        evObj.type = "post";
+                    }
+                    postEvents.push(evObj);
+                } catch (err) {
+                    console.error("Error loading post:", err);
+                    console.log("Invalid JSON:", line);
+                    numBadJSONs++;
+                }
+            });
+            let endTime = getCurrentClockTime();
+            console.log("Loaded posts:", posts);
+            console.log("Num multiline JSONs:", numMultilineJSONs);
+            console.log("Num bad JSONs:", numBadJSONs);
+            console.log(`Loaded ${postEvents.length} posts in ${endTime - startTime} secs`);
+            eventsFromDATA = postEvents;
+            return postEvents;
+        }
+
+        async function loadLongTermData() {
+            if (eventsFromDATA) {
+                // If we have already loaded events, just use them
+                return;
+            }
+            const postEvts = await fetchLongTermData();
+            // update postEvents
+            let numPostsSeen = 0;
+            let numPostsAdded = 0;
+            postEvts.forEach(pEvt => {
+                numPostsSeen++;
+                const uri = pEvt.post.uri
+                console.log("Processing post event object:", uri);
+                const existing = postEventsByURI[uri];
+                if (existing) {
+                    //console.log("Updating existing post event:", existing);
+                    // Update existing post event
+                    //Object.assign(existing, peObj);
+                    existing.isNew = false;
+                } else {
+                    // Add new post event
+                    console.log("New post event:", pEvt);
+                    pEvt.isNew = true;
+                    postEvents.push(pEvt);
+                    postEventsByURI[uri] = pEvt;
+                    numPostsAdded++;
+                }
+            });
+            console.log(`Seen ${numPostsSeen} posts`);
+            console.log(`Added ${numPostsAdded} new posts`);
+            // sort postEvents
+            postEvents.sort((a, b) =>
+                new Date(b.post.createdAt) - new Date(a.post.createdAt));
+        }
+
+        chart = new Chart();
+        fetchAndDisplayPosts();
+
+
+        setInterval(fetchAndDisplayPosts, 10000);
+        setInterval(updateChart, 100);
+    </script>
+</body>
+
+</html>
