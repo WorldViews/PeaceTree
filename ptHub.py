@@ -3,7 +3,7 @@
 Bluesky Hashtag Monitor
 Continuously polls Bluesky for posts containing #peace or #peacetree hashtags
 """
-
+import sys
 import time
 import json
 import requests
@@ -16,6 +16,9 @@ import logging
 import paho.mqtt.client as mqtt
 from ExpDecayRateEstimator import ExpDecayRateEstimator
 from PeaceTreeAPI import PeaceTreeMQTTClient
+
+STDOUT = sys.stdout
+sys.stdout = sys.stderr  # redirect print to stderr for logging
 
 # a function that gets the hostname of the machine
 # this is running on
