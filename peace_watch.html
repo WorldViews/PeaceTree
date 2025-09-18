@@ -85,7 +85,7 @@ is periodically updated.
             style="font-size: 0.95em; color: #555; position: absolute; right: 0; top: 0; text-align: right;"></span>
     </div>
     <div id="xxx">
-        <input type="button" value="Load Long-Term Data" onclick="loadLongTermData()">
+        <input id="loadLongTermDataBtn" type="button" value="Load Long-Term Data" onclick="loadLongTermData()">
         <span id="status">...</span>
     </div>
     <div id="posts">Loading...</div>
@@ -292,6 +292,9 @@ is periodically updated.
             console.log(`Seen ${numPostsSeen} posts`);
             console.log(`Added ${numPostsAdded} new posts`);
             postEvents.sort((a, b) => new Date(b.post.createdAt) - new Date(a.post.createdAt));
+            // hide load long term button
+            document.getElementById('loadLongTermDataBtn').style.display = 'none';
+            showStatus(`Loaded ${numPostsLoaded} posts`);
         }
 
         chart = new PeaceTreeChart();
