@@ -55,10 +55,12 @@ is periodically updated.
             font-size: 0.9em;
         }
     </style>
-    <!-- Include the new data class -->
+    <!-- Include PeaceTreeData class -->
     <script src="PeaceTreeData.js"></script>
-    <!-- Include the extracted Chart class -->
+    <!-- Include the PeaceTreeChart class -->
     <script src="PeaceTreeChart.js"></script>
+    <!-- Include the Gong sound helper -->
+    <script src="Gong.js"></script>
 </head>
 
 <body>
@@ -96,7 +98,7 @@ is periodically updated.
         the post's uri field, which is unique for the post.
         */
         let numPostsLoaded = 0;
-        let audioContext = null;
+        // Removed: let audioContext = null;  // now managed inside Gong.js
         let postEvents = [];
         let postEventsByURI = {};
         let chart = null;
@@ -138,59 +140,14 @@ is periodically updated.
             }
         }
 
-        // Create Buddhist gong sound using Web Audio API
-        function playGongSound() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-
-            const duration = 3; // 3 seconds
-            const sampleRate = audioContext.sampleRate;
-            const buffer = audioContext.createBuffer(1, duration * sampleRate, sampleRate);
-            const data = buffer.getChannelData(0);
-
-            // Generate gong-like sound with multiple harmonics
-            for (let i = 0; i < buffer.length; i++) {
-                const t = i / sampleRate;
-                const envelope = Math.exp(-t * 2); // Exponential decay
-
-                // Multiple frequencies for rich gong sound
-                const fundamental = 220; // Base frequency
-                let sample = 0;
-                sample += Math.sin(2 * Math.PI * fundamental * t) * 0.3;
-                sample += Math.sin(2 * Math.PI * fundamental * 1.5 * t) * 0.2;
-                sample += Math.sin(2 * Math.PI * fundamental * 2.2 * t) * 0.15;
-                sample += Math.sin(2 * Math.PI * fundamental * 3.1 * t) * 0.1;
-                sample += Math.sin(2 * Math.PI * fundamental * 4.7 * t) * 0.05;
-
-                // Add some noise for metallic quality
-                sample += (Math.random() - 0.5) * 0.02 * envelope;
-
-                data[i] = sample * envelope * 0.3; // Keep volume moderate
-            }
-
-            const source = audioContext.createBufferSource();
-            source.buffer = buffer;
-
-            // Add reverb-like effect
-            const gainNode = audioContext.createGain();
-            gainNode.gain.setValueAtTime(0.7, audioContext.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
-
-            source.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            source.start();
-        }
-
         function showStatus(msg) {
             const statusEl = document.getElementById('status');
             statusEl.textContent = msg;
         }
 
         function playAudio() {
-            // if checkbox is checked, playGongSound
             if (document.getElementById('sounds').checked) {
-                playGongSound();
+                playGongSound(); // from Gong.js
             }
         }
 
@@ -211,8 +168,7 @@ is periodically updated.
         // replaced by code that uses websockets to update each new post
         // but for not this reloads the file of recent posts, and ignores
         // posts that have already been loaded
-        async function fetchAndDisplayPosts() {
-            //playGongSound();
+        async function handleRecentPosts() {
             console.log("Fetching recent posts...");
             try {
                 const response = await fetch('RECENT_POSTS.json', { cache: "no-store" });
@@ -226,10 +182,10 @@ is periodically updated.
                 // postEventObjs and postEventObjByURI accordingly
                 recentPostEventsArray.forEach(peObj => {
                     const uri = peObj.post.uri
-                    console.log("Processing post event object:", uri);
+                    //console.log("Processing post event object:", uri);
                     let existing = postEventsByURI[uri];
                     if (existing) {
-                        console.log("Updating existing post event:", existing);
+                        //console.log("Updating existing post event:", existing);
                         existing.isNew = false;
                     } else {
                         // Add new post event
@@ -302,11 +258,16 @@ is periodically updated.
             postEvts.forEach(pEvt => {
                 numPostsSeen++;
                 const uri = pEvt.post.uri;
+                if (uri === undefined) {
+                    console.warn("Post event has no URI:", pEvt);
+                    return; // skip if no uri
+                }
                 const existing = postEventsByURI[uri];
                 if (existing) {
                     existing.isNew = false;
                 } else {
-                    pEvt.isNew = true;
+                    //pEvt.isNew = true;
+                    pEvt.isNew = false; // all old events are considered not new
                     postEvents.push(pEvt);
                     postEventsByURI[uri] = pEvt;
                     numPostsAdded++;
@@ -318,9 +279,8 @@ is periodically updated.
         }
 
         chart = new PeaceTreeChart();
-        fetchAndDisplayPosts();
-
-        setInterval(fetchAndDisplayPosts, 10000);
+        handleRecentPosts();
+        setInterval(handleRecentPosts, 10000);
         setInterval(updateChart, 100);
     </script>
 </body>
