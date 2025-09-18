@@ -84,7 +84,10 @@ is periodically updated.
         <span id="startTimeStr"
             style="font-size: 0.95em; color: #555; position: absolute; right: 0; top: 0; text-align: right;"></span>
     </div>
-    <div id="status">Idle.</div>
+    <div id="xxx">
+        <input type="button" value="Load Long-Term Data" onclick="loadLongTermData()">
+        <span id="status">...</span>
+    </div>
     <div id="posts">Loading...</div>
     <script>
         /*
@@ -267,7 +270,7 @@ is periodically updated.
                     existing.isNew = false;
                 } else {
                     //pEvt.isNew = true;
-                    pEvt.isNew = false; // all old events are considered not new
+                    pEvt.isNew = false; // no old events are considered new
                     postEvents.push(pEvt);
                     postEventsByURI[uri] = pEvt;
                     numPostsAdded++;
