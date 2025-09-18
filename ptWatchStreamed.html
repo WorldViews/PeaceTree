@@ -238,11 +238,24 @@ is periodically updated.
             }
         }
 
-        function renderPost(post) {
+        function handlePost(pEvt) {
             numPostsLoaded++;
             // update status to show numPosts
             showStatus(`Loaded ${numPostsLoaded} posts...`);
-            return;
+            //return;
+            const uri = pEvt.post.uri;
+            if (uri === undefined) {
+                console.warn("***Post event has no URI:", pEvt);
+                return; // skip if no uri
+            }
+            pEvt.isNew = false; // no old events are considered new
+            const existing = postEventsByURI[uri];
+            if (existing) {
+                //console.log("Skipping existing post:", uri);
+                return; // skip if already have it
+            }
+            postEvents.push(pEvt);
+            postEventsByURI[uri] = pEvt;
         }
 
         async function loadLongTermData() {
@@ -252,7 +265,7 @@ is periodically updated.
             numPostsLoaded = 0;
             console.log("Loading long term data from PeaceTreeData...");
             showStatus("Loading long term data...");
-            peaceTreeData.setPostHandler(renderPost); // set handler to renderPost
+            peaceTreeData.setPostHandler(handlePost); // set handler to renderPost
             const postEvts = await peaceTreeData.streamData();
             eventsFromDATA = postEvts; // preserve original side effect
 
