@@ -4,63 +4,11 @@ class PeaceTreeData {
         this.postHandler = postHandler;
     }
 
-    // This method preserves the original behavior of fetchLongTermData
-    // (including multiline JSON reassembly and logging quirks).
-    async fetchLongTermData_0() {
-        console.log("Fetching long-term data from DATA_LOG.json...");
-        const startTime = Math.floor(Date.now() / 1000);
-        const response = await fetch('DATA_LOG.json');
-        const data = await response.text();
-        const jsonLines = data.split('\n').filter(line => line.trim() !== '');
-        console.log("Num lines read:", jsonLines.length);
-
-        let postEvents = [];
-        let partialLine = null;
-        let numMultilineJSONs = 0;
-        let numBadJSONs = 0;
-
-        jsonLines.forEach(line => {
-            if (partialLine) {
-                partialLine = partialLine + line;
-                if (line.trim() === '}') {
-                    line = partialLine;
-                    partialLine = null;
-                } else {
-                    return;
-                }
-            }
-            if (line.trim() === "{") {
-                partialLine = line;
-                numMultilineJSONs++;
-                return;
-            }
-            try {
-                const evObj = JSON.parse(line);
-                if (evObj.post == null) {
-                    console.log("skipping non-post event:", evObj);
-                    return;
-                }
-                if (!evObj.type) {
-                    evObj.type = "post";
-                }
-                postEvents.push(evObj);
-                if (this.postHandler) {
-                    this.postHandler(evObj);
-                }
-            } catch (err) {
-                console.error("Error loading post:", err);
-                console.log("Invalid JSON:", line);
-                numBadJSONs++;
-            }
-        });
-
-        const endTime = Math.floor(Date.now() / 1000);
-        // Fixed: previously referenced undefined variable 'posts'
-        console.log("Loaded posts count:", postEvents.length);
-        console.log("Num multiline JSONs:", numMultilineJSONs);
-        console.log("Num bad JSONs:", numBadJSONs);
-        console.log(`Loaded ${postEvents.length} posts in ${endTime - startTime} secs`);
-        return postEvents;
+    setPostHandler(handler) {
+        this.postHandler = handler;
+    }
+    clearPostHandler() {
+        this.postHandler = null;
     }
 
     // This method loads all data at once, breaks it into lines,
