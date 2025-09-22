@@ -99,8 +99,9 @@ def on_message(client, userdata, msg):
         #print(f"********* Ignored message we sent")
         return
     #print(f"********* Message from another client: {obj}")
-    if obj.get("type") == "rtweb_post":
-        print("******* Received rtweb_post", obj)
+    type = obj.get("type")
+    if type == "rtweb_post" or type == "instagram_peace_post_estimate":
+        print("******* Received", type, obj)
         obj["post"]["uri"] = getUniquePostURI()
         ct = time.time()
         createdAt = obj["post"].get("createdAt")
@@ -419,52 +420,54 @@ class BlueskyMonitor:
             
             if post_id not in self.seen_posts:
                 self.seen_posts.add(post_id)
-                print("="*70)
-                print(f"Total posts: {len(self.seen_posts)}")
-                # get t as UTC float
-                # post creation time
-                pt = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00')).timestamp()
-                ct = time.time()
-                delay = ct - pt
-                print(f"Delay: {delay} seconds")
-                # print time elapsed since previous post
-                if self.last_post_time:
-                    elapsed = pt - self.last_post_time
-                    # Print elapsed time in seconds
-                    print(f"Time since previous post: {elapsed} seconds")
-                self.last_post_time = pt
-                bonus = 0
-                if post_info['text'].find("peacedance") >= 0:
-                    bonus = 8
-                    post_peace_message()
-                msg = {'post': post_info,
-                       'clientId': getClientId(),
-                       'type': 'post',
-                       'pt': pt,
-                       'ct': ct,
-                       'delay': ct - pt}
-                if rateEst:
-                    print("Updating rate estimate", pt, 1+bonus)
-                    rateEst.update(pt, 1+bonus)
-                    msg['rate'] = rateEst.get_rate(pt)* 3600  # convert to events/hour
-                    print(f"Rate estimate: {msg['rate']:.4f} events/hour")
-                print(self.format_post_output(post_info))
-                if DATA_LOG_FILE:
-                    print("Logging post message")
-                    f = open(DATA_LOG_FILE, "a")
-                    f.write(json.dumps(msg) + "\n")
-                    f.close()
-                if recentPosts != None:
-                    recentPosts.add_post(msg)
-                if wsclient:
-                    rc = wsclient.publish(BLUESKY_TOPIC, json.dumps(msg), retain=True)
-                    print(f"Published to {BLUESKY_TOPIC}")
+                self.process_new_post(post_info)
                 new_posts_count += 1
 
         # Update cursor for next request
-        self.cursor = results.get('cursor')
-        
+        self.cursor = results.get('cursor')    
         return new_posts_count
+    
+    def process_new_post(self, post_info: Dict[str, Any]):
+        print("="*70)
+        print(f"Total posts: {len(self.seen_posts)}")
+        # get t as UTC float
+        # post creation time
+        pt = datetime.fromisoformat(post_info['createdAt'].replace('Z', '+00:00')).timestamp()
+        ct = time.time()
+        delay = ct - pt
+        print(f"Delay: {delay} seconds")
+        # print time elapsed since previous post
+        if self.last_post_time:
+            elapsed = pt - self.last_post_time
+            # Print elapsed time in seconds
+            print(f"Time since previous post: {elapsed} seconds")
+        self.last_post_time = pt
+        bonus = 0
+        if post_info['text'].find("peacedance") >= 0:
+            bonus = 8
+            post_peace_message()
+        msg = { 'post': post_info,
+                'clientId': getClientId(),
+                'type': 'post',
+                'pt': pt,
+                'ct': ct,
+                'delay': ct - pt}
+        if rateEst:
+            print("Updating rate estimate", pt, 1+bonus)
+            rateEst.update(pt, 1+bonus)
+            msg['rate'] = rateEst.get_rate(pt)* 3600  # convert to events/hour
+            print(f"Rate estimate: {msg['rate']:.4f} events/hour")
+        print(self.format_post_output(post_info))
+        if DATA_LOG_FILE:
+            print("Logging post message")
+            with open(DATA_LOG_FILE, "a") as f:
+                f.write(json.dumps(msg) + "\n")
+        if recentPosts != None:
+            recentPosts.add_post(msg)
+        if wsclient:
+            rc = wsclient.publish(BLUESKY_TOPIC, json.dumps(msg), retain=True)
+            print(f"Published to {BLUESKY_TOPIC}")
+
     
     def cleanup_seen_posts(self, max_size: int = 10000):
         """Clean up seen_posts set to prevent memory issues"""
