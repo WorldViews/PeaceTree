@@ -89,7 +89,8 @@ def send_peace_message(text):
 
     # Publish message
     # create timestamp string in iso format
-    timestamp = datetime.datetime.now().isoformat()
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    
     obj = {"type": "rtweb_post",
            "post": {
                 "text": text,
