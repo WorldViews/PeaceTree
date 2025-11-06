@@ -25,6 +25,23 @@ sys.stdout = sys.stderr  # redirect print to stderr for logging
 def getHostname():
     return socket.gethostname()
 
+HOSTNAME = getHostname()
+BROKER = "takeoneworld.com"
+TRANSPORT = "TCP"
+PORT = 1883
+BLUESKY_TOPIC = "peacetreebsky" # topic for bluesky information
+API_TOPIC = "peacetreedev/bskyonly/api"  # topic being watched by WLED server
+HEARTBEAT_TOPIC = "peacetreedev/bluesky/heartbeat" # topic for bluesky heartbeat
+                                                    # containing rate info
+BLUESKY_POST_TOPIC = "peacetreedev/bluesky/post" # topic for posting bluesky posts
+USER = "dkimber1179"
+PASSWORD = "d0cz3n0!2025"
+DATA_LOG_FILE = "DATA_LOG.json"
+RECENT_POSTS_FILE = "RECENT_POSTS.json"
+MAX_NUM_RECENT_POSTS = 25
+
+
+
 # create unique clientId for this process
 def getClientId():
     pid = os.getpid()
@@ -35,23 +52,10 @@ def getClientId():
 def getUniquePostURI():
     return f"peacetree://{HOSTNAME}/{time.time()}"
 
-HOSTNAME = getHostname()
 
-BROKER = "takeoneworld.com"
-TRANSPORT = "TCP"
-PORT = 1883
-API_TOPIC = "peacetreedev/api"  # topic being watched by WLED server
-BLUESKY_TOPIC = "peacetreebsky" # topic posting bluesky info
-USER = "dkimber1179"
-PASSWORD = "d0cz3n0!2025"
-DATA_LOG_FILE = "DATA_LOG.json"
-
-wsclient = None
+mqttClient = None
 rateEst = ExpDecayRateEstimator(1/500.0)  # Example alpha value for decay rate
 peaceTreeClient = None
-
-RECENT_POSTS_FILE = "RECENT_POSTS.json"
-MAX_NUM_RECENT_POSTS = 25
 
 # Class for keeping track of recent posts
 # and some state like rate.
@@ -100,7 +104,7 @@ def on_message(client, userdata, msg):
         return
     #print(f"********* Message from another client: {obj}")
     type = obj.get("type")
-    if type == "rtweb_post" or type == "instagram_peace_post_estimate":
+    if type == "rtpeacetree_post" or type == "instagram_peace_post_estimate":
         print("******* Received", type, obj)
         obj["post"]["uri"] = getUniquePostURI()
         ct = time.time()
@@ -125,24 +129,24 @@ def on_message(client, userdata, msg):
             with open(DATA_LOG_FILE, "a") as f:
                 f.write(json.dumps(obj) + "\n")
 
-def startWSClient():
-    global wsclient
+def startMQTTClient():
+    global mqttClient
     print("*******  Getting MQTT Client - transport:", TRANSPORT)
-    wsclient = mqtt.Client(transport=TRANSPORT,
+    mqttClient = mqtt.Client(transport=TRANSPORT,
                            protocol=mqtt.MQTTv5,
                            callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     if USER:
         print("Authenticating User:", USER)
-        wsclient.username_pw_set(USER, PASSWORD)
+        mqttClient.username_pw_set(USER, PASSWORD)
     else:
         print("No authentication being used.")
     # setup handler for connect and disconnect
-    wsclient.on_connect = on_connect
-    wsclient.on_disconnect = on_disconnect
-    wsclient.on_message = on_message
-    wsclient.reconnect_delay_set(min_delay=1, max_delay=120)  # 1-120 second delays
-    wsclient.connect(BROKER, PORT, 60)
-    wsclient.loop_start()
+    mqttClient.on_connect = on_connect
+    mqttClient.on_disconnect = on_disconnect
+    mqttClient.on_message = on_message
+    mqttClient.reconnect_delay_set(min_delay=1, max_delay=120)  # 1-120 second delays
+    mqttClient.connect(BROKER, PORT, 60)
+    mqttClient.loop_start()
     #time.sleep(1)  # Allow time for connection to establish
 
 # Configure logging
@@ -464,9 +468,9 @@ class BlueskyMonitor:
                 f.write(json.dumps(msg) + "\n")
         if recentPosts != None:
             recentPosts.add_post(msg)
-        if wsclient:
-            rc = wsclient.publish(BLUESKY_TOPIC, json.dumps(msg), retain=True)
-            print(f"Published to {BLUESKY_TOPIC}")
+        if mqttClient:
+            rc = mqttClient.publish(BLUESKY_POST_TOPIC, json.dumps(msg), retain=True)
+            print(f"Published to {BLUESKY_POST_TOPIC}")
 
     
     def cleanup_seen_posts(self, max_size: int = 10000):
@@ -547,7 +551,7 @@ class BlueskyMonitor:
                 # Periodic cleanup
                 self.cleanup_seen_posts()
                 
-                if wsclient:
+                if mqttClient:
                     ct = time.time()
                     msg = {"type": "heartbeat",
                            "clientId": getClientId(),
@@ -555,8 +559,11 @@ class BlueskyMonitor:
                     if rateEst:
                         msg['rate'] = rateEst.get_rate(ct) * 3600
                         print(f"Heartbeat rate estimate: {msg['rate']:.4f} events/hour")
-                    wsclient.publish(BLUESKY_TOPIC, json.dumps(msg), retain=True)
+                    msgStr = json.dumps(msg)
+                    mqttClient.publish(BLUESKY_TOPIC, msgStr, retain=True)
                     print(f"Published heartbeat to {BLUESKY_TOPIC}")
+                    mqttClient.publish(HEARTBEAT_TOPIC, msgStr, retain=True)
+                    print(f"Published heartbeat to {HEARTBEAT_TOPIC}")
                     if peaceTreeClient:
                         peaceTreeClient.set_post_rate(msg['rate'])
                 # Wait before next poll
@@ -595,7 +602,7 @@ def main():
     print("export BLUESKY_PASSWORD=your_password")
     print()
 
-    startWSClient()
+    startMQTTClient()
     startPeaceTreeClient()
 
     # Create and run monitor
