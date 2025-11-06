@@ -109,7 +109,9 @@ def on_message(client, userdata, msg):
         obj["post"]["uri"] = getUniquePostURI()
         ct = time.time()
         createdAt = obj["post"].get("createdAt")
-        pt = datetime.fromisoformat(createdAt.replace('Z', '+00:00')).timestamp()
+        #pt = datetime.fromisoformat(createdAt.replace('Z', '+00:00')).timestamp()
+        pt = ct  # bogus but not far off, and
+                # avoids problem with bad createdAt
         # convert iso timestamp to UTC
         obj["pt"] = pt
         obj["ct"] = ct
